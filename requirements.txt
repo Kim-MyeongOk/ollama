@@ -1,0 +1,6 @@
+# requirements.txt
+fastapi
+uvicorn
+langchain-openai
+httpx
+pyyaml
