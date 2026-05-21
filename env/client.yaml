@@ -3,11 +3,13 @@ server:
   url: "http://localhost:8000/v1/chat/completions"
 
 http_client:
-  timeout: 120.0
+  timeout: 180.0
 
 console:
   colors:
-    reasoning: "\033[35m"   # MAGENTA
-    content: "\033[34m"     # BLUE
-    error: "\033[31m"       # RED
-    reset: "\033[0m"
+    magenta: "\x1b[35m"   # reasoning
+    blue: "\x1b[34m"     # content
+    green: "\x1b[32m"
+    bright_green: "\x1b[92m"
+    red: "\x1b[31m"       # error
+    reset: "\x1b[0m"

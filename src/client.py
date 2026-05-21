@@ -22,10 +22,10 @@ if sys.platform == "win32":
     os.system("color")
 
 # 색상 직접 선언
-MAGENTA = "\033[35m"
-BLUE = "\033[34m"
-RED = "\033[31m"
-RESET = "\033[0m"
+REASONING = config["console"]['colors']["magenta"]
+CONTENT = config['console']['colors']['bright_green']
+ERROR = config['console']['colors']['red']
+RESET = config['console']['colors']['reset']
 
 # ── 스트리밍 채팅 ─────────────────────────────────────────────
 async def stream_chat(user_message: str) -> None:
@@ -46,7 +46,7 @@ async def stream_chat(user_message: str) -> None:
             ) as response:
 
                 if response.status_code != 200:
-                    print(f"{RED}서버 에러: {response.status_code}{RESET}")
+                    print(f"{ERROR}서버 에러: {response.status_code}{RESET}")
                     return
 
                 async for line in response.aiter_lines():
@@ -64,7 +64,7 @@ async def stream_chat(user_message: str) -> None:
                         continue
 
                     if "error" in data:
-                        print(f"\n{RED}에러: {data['error']}{RESET}")
+                        print(f"\n{ERROR}에러: {data['error']}{RESET}")
                         break
 
                     delta = data.get("choices", [{}])[0].get("delta", {})
@@ -72,7 +72,7 @@ async def stream_chat(user_message: str) -> None:
                     content   = delta.get("content", "")
 
                     if reasoning:
-                        print(f"{MAGENTA}{reasoning}{RESET}",
+                        print(f"{REASONING}{reasoning}{RESET}",
                               end="", flush=True)
                         prev_was_reasoning = True
 
@@ -81,30 +81,34 @@ async def stream_chat(user_message: str) -> None:
                         if prev_was_reasoning:
                             print("\n")
                             prev_was_reasoning = False
-                        print(f"{BLUE}{content}{RESET}",
+                        print(f"{CONTENT}{content}{RESET}",
                               end="", flush=True)
 
     except httpx.ConnectError:
-        print(f"{RED}서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.{RESET}")
+        print(f"{ERROR}서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.{RESET}")
     except httpx.TimeoutException:
-        print(f"{RED}요청 시간이 초과되었습니다.{RESET}")
+        print(f"{ERROR}요청 시간이 초과되었습니다.{RESET}")
     except KeyboardInterrupt:
-        print(f"\n{RED}중단되었습니다.{RESET}")
+        print(f"\n{ERROR}중단되었습니다.{RESET}")
     finally:
         print()
 
 
 # ── 실행 ──────────────────────────────────────────────────────
 def main():
-    if len(sys.argv) > 1:
-        question = " ".join(sys.argv[1:])
-    else:
+    while True:
         question = input("질문을 입력하세요: ").strip()
+
         if not question:
             print("질문을 입력해주세요.")
-            return
+            continue
 
-    asyncio.run(stream_chat(question))
+        if question.lower() in ["exit", "quit", "종료", "q"]:
+            print("종료합니다.")
+            break
+
+        asyncio.run(stream_chat(question))
+        print()
 
 
 if __name__ == "__main__":
