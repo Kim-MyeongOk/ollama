@@ -1,0 +1,13 @@
+# client.yaml
+server:
+  url: "http://localhost:8000/v1/chat/completions"
+
+http_client:
+  timeout: 120.0
+
+console:
+  colors:
+    reasoning: "\033[35m"   # MAGENTA
+    content: "\033[34m"     # BLUE
+    error: "\033[31m"       # RED
+    reset: "\033[0m"
