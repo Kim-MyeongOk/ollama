@@ -23,7 +23,7 @@ if sys.platform == "win32":
 
 # 색상 직접 선언
 REASONING = config["console"]['colors']["magenta"]
-CONTENT = config['console']['colors']['bright_green']
+CONTENT = config['console']['colors']['blue']
 ERROR = config['console']['colors']['red']
 RESET = config['console']['colors']['reset']
 
