@@ -3,7 +3,7 @@ server:
   url: "http://localhost:8000/v1/chat/completions"
 
 http_client:
-  timeout: 180.0
+  timeout: 300.0
 
 console:
   colors:

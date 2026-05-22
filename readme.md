@@ -24,7 +24,6 @@ C:\Users\{사용자명}\anaconda3\envs\ollama   ← anaconda 가상환경 (프�
 
 ### 1. 최초 설정 (1회만)
 ```
-setup.bat 더블클릭
 → anaconda 가상환경 활성화
 → requirements.txt 패키지 자동 설치
 ```
@@ -64,7 +63,6 @@ run_client.bat 더블클릭 (별도 창)
 | server.py | src/ | FastAPI 서버 코드 (Ollama 프록시, 스트리밍 처리) |
 | client.py | src/ | 클라이언트 코드 (스트리밍 수신, 색상 출력) |
 | requirements.txt | 루트 | 패키지 목록 |
-| setup.bat | 루트 | 최초 환경 설정 |
 | run_server.bat | 루트 | 서버 실행 |
 | run_client.bat | 루트 | 클라이언트 실행 |
 
@@ -87,10 +85,10 @@ content           → BLUE 출력
 
 ## 환경 설정
 
-| 항목 | 값 |
-|------|-----|
+| 항목 | 값                      |
+|------|------------------------|
 | Python | anaconda 가상환경 (ollama) |
-| 서버 포트 | 8000 |
-| Ollama 포트 | 11434 |
-| 모델 | qwen3-vl:4b |
-| 타임아웃 | 120초 |
+| 서버 포트 | 8000                   |
+| Ollama 포트 | 11434                  |
+| 모델 | qwen3-vl:4b            |
+| 타임아웃 | 300초                   |

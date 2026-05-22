@@ -8,7 +8,7 @@ ollama:
   base_url: "http://localhost:11434/v1"
   api_key: "ollama"
   model: "qwen3-vl:4b"
-  timeout: 120
+  timeout: 300
   streaming: true
 
 http_client:
