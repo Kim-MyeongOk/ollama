@@ -1,6 +1,4 @@
 import json
-import os
-
 import httpx
 import logging
 import uvicorn
@@ -55,7 +53,6 @@ def get_http_client() -> httpx.AsyncClient:
 # ── lifespan ─────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    get_http_client()
     yield
     global _http_client
     if _http_client:
@@ -79,24 +76,13 @@ class CustomChatOpenAI(ChatOpenAI):
             chunk, default_chunk_class, base_generation_info
         )
 
-        if gen_chunk is None:
-            return None
+        if gen_chunk is not None:
+            delta = chunk.get("choices", [{}])[0].get("delta", {})
+            reasoning = delta.get("reasoning", "")
+            delta["reasoning_content"] = reasoning
 
-        try:
-            delta = (chunk.get("choices") or [{}])[0].get("delta", {})
-
-            # dict인 경우
-            if isinstance(delta, dict):
-                reasoning = delta.get("reasoning_content")
-            # openai 객체인 경우
-            else:
-                reasoning = getattr(delta, "reasoning_content", None)
-
-            if reasoning and isinstance(gen_chunk.message, AIMessageChunk):
+            if isinstance(gen_chunk.message, AIMessageChunk):
                 gen_chunk.message.additional_kwargs["reasoning_content"] = reasoning
-
-        except Exception:
-            pass
 
         return gen_chunk
 
@@ -147,7 +133,14 @@ async def chat_completions(request: Request):
     async def generate() -> AsyncIterator[str]:
         try:
             final_message = None
+            accumulated_reasoning = ""  # reasoning 별도 누적
+
             async for chunk in llm.astream(message_list):
+
+                # 디버그 로그
+                # logger.info(f"chunk.content: {repr(chunk.content)}")
+                # logger.info(f"chunk.additional_kwargs: {chunk.additional_kwargs}")
+
                 # 청크 누적
                 if final_message is None:
                     final_message = chunk
@@ -156,6 +149,10 @@ async def chat_completions(request: Request):
 
                 reasoning = chunk.additional_kwargs.get("reasoning_content", "")
                 content = chunk.content or ""
+
+                # reasoning 별도 누적
+                if reasoning:
+                    accumulated_reasoning += reasoning
 
                 if not reasoning and not content:
                     continue
@@ -169,6 +166,13 @@ async def chat_completions(request: Request):
                     }]
                 }
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+            # 스트리밍 완료 후 final_message에 누적된 reasoning 반영
+            if final_message and accumulated_reasoning:
+                final_message.additional_kwargs["reasoning_content"] = accumulated_reasoning
+
+            # logger.info(f"최종 누적 content: {final_message.content if final_message else None}")
+            # logger.info(f"최종 누적 reasoning: {accumulated_reasoning[:50] if accumulated_reasoning else None}")
 
         except Exception as e:
             logger.error(f"스트리밍 중 에러: {e}")
