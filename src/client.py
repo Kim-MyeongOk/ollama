@@ -29,6 +29,11 @@ RESET = config['console']['colors']['reset']
 
 # ── 스트리밍 채팅 ─────────────────────────────────────────────
 async def stream_chat(user_message: str) -> None:
+    headers = {
+        "Content-Type": "application/json",
+        "X-Session-ID": "0000-0000-0000-0000"  # 사용할 세션 ID
+    }
+
     payload = {
         "messages": [
             {"role": "user", "content": user_message}
@@ -38,13 +43,8 @@ async def stream_chat(user_message: str) -> None:
     prev_was_reasoning = False
 
     try:
-        async with httpx.AsyncClient(
-            timeout=config["http_client"]["timeout"]
-        ) as client:
-            async with client.stream(
-                "POST", SERVER_URL, json=payload
-            ) as response:
-
+        async with httpx.AsyncClient(timeout=config["http_client"]["timeout"]) as client:
+            async with client.stream("POST", SERVER_URL, json=payload, headers=headers) as response:
                 if response.status_code != 200:
                     print(f"{ERROR}서버 에러: {response.status_code}{RESET}")
                     return
@@ -72,8 +72,7 @@ async def stream_chat(user_message: str) -> None:
                     content   = delta.get("content", "")
 
                     if reasoning:
-                        print(f"{REASONING}{reasoning}{RESET}",
-                              end="", flush=True)
+                        print(f"{REASONING}{reasoning}{RESET}", end="", flush=True)
                         prev_was_reasoning = True
 
                     if content:
@@ -81,8 +80,7 @@ async def stream_chat(user_message: str) -> None:
                         if prev_was_reasoning:
                             print("\n")
                             prev_was_reasoning = False
-                        print(f"{CONTENT}{content}{RESET}",
-                              end="", flush=True)
+                        print(f"{CONTENT}{content}{RESET}", end="", flush=True)
 
     except httpx.ConnectError:
         print(f"{ERROR}서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.{RESET}")

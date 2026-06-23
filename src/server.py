@@ -1,18 +1,18 @@
 import json
+import yaml
 import httpx
 import logging
 import uvicorn
-import yaml
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import StreamingResponse
-from langchain_openai import ChatOpenAI
+from contextlib              import asynccontextmanager
+from fastapi                 import FastAPI, Request, HTTPException
+from fastapi.responses       import StreamingResponse
+from fastapi.openapi.utils   import get_openapi
+from langchain_openai        import ChatOpenAI
 from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage, BaseMessage
-from langchain_core.outputs import ChatGenerationChunk
+from langchain_core.outputs  import ChatGenerationChunk
 from typing import AsyncIterator
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from typing import Dict
+from typing import List
 
 
 # ── 설정 로드 ─────────────────────────────────────────────────
@@ -20,8 +20,16 @@ def load_config(path: str) -> dict:
     with open(path, "r") as f:
         return yaml.safe_load(f)
 
-yaml_path = "../env/server.yaml"
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+yaml_path = "./env/server.yaml"
 config = load_config(yaml_path)
+
+# 대화 이력 저장소 (실무에서는 Redis나 RDB 사용 권장)
+# 구조: { session_id: [{"role": "user/assistant/system", "content": "...", "reasoning_content": "..."}] }
+chat_histories: Dict[str, List[Dict[str, str]]] = {}
 
 
 # ── 싱글톤 커넥션 풀 ──────────────────────────────────────────
@@ -123,25 +131,42 @@ async def chat_completions(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="잘못된 JSON 형식입니다")
 
+    session_id = request.headers.get("X-Session-ID")
+    incoming_messages = body.get("messages", [])
+
+    if not incoming_messages:
+        raise HTTPException(status_code=400, detail="messages 필드가 비어있습니다")
+
+    if session_id:
+        if session_id not in chat_histories:
+            # 처음 연결된 세션이라면 현재 들어온 메시지 전체로 초기화 (시스템 프롬프트 등 포함 가능)
+            chat_histories[session_id] = incoming_messages
+        else:
+            # 기존 이력이 있다면, 클라이언트가 보낸 '마지막 유저 메시지'만 기존 이력에 누적
+            # (프론트엔드가 이전 대화를 다 보낼 필요 없이 새 질문만 보내도 됨)
+            last_user_message = incoming_messages[-1]
+            chat_histories[session_id].append(last_user_message)
+
+        # LLM에 전달할 최종 메시지 리스트는 '누적된 전체 대화 이력'이 됩니다.
+        target_messages = chat_histories[session_id]
+    else:
+        # session_id가 없으면 일반적인 1회성 대화로 처리
+        target_messages = incoming_messages
+
     try:
-        message_list = parse_messages(body.get("messages", []))
+        # LangChain Message 객체로 변환 (기존 함수 활용)
+        message_list = parse_messages(target_messages)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    llm = make_llm()
 
     async def generate() -> AsyncIterator[str]:
         try:
             final_message = None
-            accumulated_reasoning = ""  # reasoning 별도 누적
+            accumulated_reasoning = ""
+            accumulated_content = ""  # AI 답변 저장을 위해 content도 누적
 
             async for chunk in llm.astream(message_list):
-
-                # 디버그 로그
-                # logger.info(f"chunk.content: {repr(chunk.content)}")
-                # logger.info(f"chunk.additional_kwargs: {chunk.additional_kwargs}")
-
-                # 청크 누적
                 if final_message is None:
                     final_message = chunk
                 else:
@@ -150,9 +175,10 @@ async def chat_completions(request: Request):
                 reasoning = chunk.additional_kwargs.get("reasoning_content", "")
                 content = chunk.content or ""
 
-                # reasoning 별도 누적
                 if reasoning:
                     accumulated_reasoning += reasoning
+                if content:
+                    accumulated_content += content
 
                 if not reasoning and not content:
                     continue
@@ -171,11 +197,23 @@ async def chat_completions(request: Request):
             if final_message and accumulated_reasoning:
                 final_message.additional_kwargs["reasoning_content"] = accumulated_reasoning
 
-            # logger.info(f"최종 누적 content: {final_message.content if final_message else None}")
-            # logger.info(f"최종 누적 reasoning: {accumulated_reasoning[:50] if accumulated_reasoning else None}")
+            # 스트리밍이 성공적으로 끝나면 모델 추론을 해당 세션 이력에 저장
+            if session_id and (accumulated_content or accumulated_reasoning):
+                ai_message_history = {
+                    "role": "assistant",
+                    "content": accumulated_content
+                }
+                # Reasoning(생각 과정) 데이터가 존재한다면 이력에도 포함
+                if accumulated_reasoning:
+                    ai_message_history["reasoning_content"] = accumulated_reasoning
+
+                chat_histories[session_id].append(ai_message_history)
 
         except Exception as e:
             logger.error(f"스트리밍 중 에러: {e}")
+            # 에러 발생 시 메모리 오염을 막기 위해 이번에 추가된 유저 메시지 롤백(제거)
+            if session_id and session_id in chat_histories and chat_histories[session_id]:
+                chat_histories[session_id].pop()
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         finally:
             yield "data: [DONE]\n\n"
@@ -196,6 +234,7 @@ async def health():
     return {"status": "ok"}
 
 
+llm = make_llm()
 # ── 실행 ──────────────────────────────────────────────────────
 if __name__ == "__main__":
     sv = config["server"]
