@@ -1,5 +1,5 @@
 import json
-import yaml
+import traceback
 import httpx
 import logging
 import uvicorn
@@ -13,19 +13,9 @@ from langchain_core.outputs  import ChatGenerationChunk
 from typing import AsyncIterator
 from typing import Dict
 from typing import List
-
-
-# ── 설정 로드 ─────────────────────────────────────────────────
-def load_config(path: str) -> dict:
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
-
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-yaml_path = "./env/server.yaml"
-config = load_config(yaml_path)
+from config import cfg
+from config import logging as logger
+from openai import APIConnectionError
 
 # 대화 이력 저장소 (실무에서는 Redis나 RDB 사용 권장)
 # 구조: { session_id: [{"role": "user/assistant/system", "content": "...", "reasoning_content": "..."}] }
@@ -38,21 +28,21 @@ _http_client: httpx.AsyncClient | None = None
 def get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None:
-        hc = config["http_client"]
+        http_client = cfg.http_client
         _http_client = httpx.AsyncClient(
-            limits=httpx.Limits(
-                max_connections=hc["max_connections"],
-                max_keepalive_connections=hc["max_keepalive_connections"],
-                keepalive_expiry=hc["keepalive_expiry"]
+            limits = httpx.Limits(
+                max_connections           = http_client.max_connections,
+                max_keepalive_connections = http_client.max_keepalive_connections,
+                keepalive_expiry          = http_client.keepalive_expiry
             ),
-            timeout=httpx.Timeout(
-                connect=hc["timeout"]["connect"],
-                read=hc["timeout"]["read"],
-                write=hc["timeout"]["write"],
-                pool=hc["timeout"]["pool"]
+            timeout = httpx.Timeout(
+                connect = http_client.timeout.connect,
+                read    = http_client.timeout.read,
+                write   = http_client.timeout.write,
+                pool    = http_client.timeout.pool
             ),
-            verify=hc["verify"],
-            trust_env=hc["trust_env"]
+            verify   = http_client.verify,
+            trust_env= http_client.trust_env
         )
         logger.info("HTTP 커넥션 풀 생성됨")
     return _http_client
@@ -67,7 +57,7 @@ async def lifespan(app: FastAPI):
         await _http_client.aclose()
         logger.info("HTTP 커넥션 풀 종료됨")
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan = lifespan)
 
 
 # ── ChatOpenAI 상속 - reasoning_content 처리 ─────────────────
@@ -75,9 +65,9 @@ class CustomChatOpenAI(ChatOpenAI):
 
     def _convert_chunk_to_generation_chunk(
         self,
-        chunk: dict,
-        default_chunk_class: type,
-        base_generation_info: dict | None = None,
+        chunk                : dict,
+        default_chunk_class  : type,
+        base_generation_info : dict | None = None,
     ) -> ChatGenerationChunk | None:
 
         gen_chunk = super()._convert_chunk_to_generation_chunk(
@@ -97,14 +87,14 @@ class CustomChatOpenAI(ChatOpenAI):
 
 # ── LLM 인스턴스 생성 ─────────────────────────────────────────
 def make_llm() -> CustomChatOpenAI:
-    ol = config["ollama"]
+    model_info = cfg.ollama
     return CustomChatOpenAI(
-        model=ol["model"],
-        base_url=ol["base_url"],
-        api_key=ol["api_key"],
-        streaming=ol["streaming"],
-        timeout=ol["timeout"],
-        http_async_client=get_http_client(),
+        model             = model_info.model,
+        base_url          = model_info.base_url,
+        api_key           = model_info.api_key,
+        streaming         = model_info.streaming,
+        timeout           = model_info.timeout,
+        http_async_client = get_http_client(),
     )
 
 
@@ -208,13 +198,15 @@ async def chat_completions(request: Request):
                     ai_message_history["reasoning_content"] = accumulated_reasoning
 
                 chat_histories[session_id].append(ai_message_history)
-
-        except Exception as e:
-            logger.error(f"스트리밍 중 에러: {e}")
-            # 에러 발생 시 메모리 오염을 막기 위해 이번에 추가된 유저 메시지 롤백(제거)
+        except Exception as exception:
+            if type(exception) == APIConnectionError:
+                result_data = f"data: {json.dumps({'error': '503, APIConnectionError'})}\n\n"
+            else:
+                result_data = f"data: {json.dumps({'error': str(exception)})}\n\n"
+            logger.error(f"스트리밍 중 에러: {exception}")
             if session_id and session_id in chat_histories and chat_histories[session_id]:
                 chat_histories[session_id].pop()
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield result_data
         finally:
             yield "data: [DONE]\n\n"
 
@@ -237,10 +229,12 @@ async def health():
 llm = make_llm()
 # ── 실행 ──────────────────────────────────────────────────────
 if __name__ == "__main__":
-    sv = config["server"]
+    server_info = cfg.server
     uvicorn.run(
-        app="server:app",
-        host=sv["host"],
-        port=sv["port"],
-        reload=sv["reload"]
+        app        = "server:app",
+        host       = server_info.host,
+        port       = server_info.port,
+        reload     = server_info.reload,
+        log_config = cfg.unicorn_logging,
+        workers    = server_info.workers
     )
